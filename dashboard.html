@@ -1,0 +1,486 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>智能宠物喂食器 - IoT 可视化监控大屏</title>
+    <!-- 引入 Tailwind CSS CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <!-- 引入 Chart.js 用于实时折线图 -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- 引入 MQTT.js 用于前端直接通过 WebSocket 连接 EMQX Cloud -->
+    <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+    <!-- 引入 Lucide 图标库 -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        /* 根样式与主题变量 */
+        :root {
+            --bg-light: #faf5ed;
+            --card-light: #ffffff;
+            --text-light: #2c3e50;
+            --border-light: #e6dfd3;
+            
+            --bg-dark: #171b21;
+            --card-dark: #21262d;
+            --text-dark: #e1e4e8;
+            --border-dark: #30363d;
+        }
+
+        body.light {
+            background-color: var(--bg-light);
+            color: var(--text-light);
+        }
+
+        body.dark {
+            background-color: var(--bg-dark);
+            color: var(--text-dark);
+        }
+
+        .theme-card {
+            transition: all 0.3s ease;
+        }
+
+        body.light .theme-card {
+            background-color: var(--card-light);
+            border: 1px solid var(--border-light);
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+        }
+
+        body.dark .theme-card {
+            background-color: var(--card-dark);
+            border: 1px solid var(--border-dark);
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.2);
+        }
+    </style>
+</head>
+<body class="light min-h-screen font-sans antialiased transition-colors duration-300">
+
+    <!-- 顶部导航栏 -->
+    <header class="theme-card border-b sticky top-0 z-50 backdrop-blur-md bg-opacity-90">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+            <div class="flex items-center space-x-3">
+                <div class="p-2 bg-amber-500 rounded-xl text-white shadow-md">
+                    <i data-lucide="utensils" class="w-6 h-6"></i>
+                </div>
+                <div>
+                    <h1 class="text-lg font-bold tracking-tight">智能宠物喂食器</h1>
+                    <p class="text-xs opacity-70">IoT Cloud Monitoring Dashboard</p>
+                </div>
+            </div>
+
+            <div class="flex items-center space-x-4">
+                <!-- 连接状态指示器 -->
+                <div id="connection-status" class="flex items-center space-x-2 px-3 py-1.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400">
+                    <span class="w-2 h-2 rounded-full bg-amber-500 animate-pulse" id="status-dot"></span>
+                    <span id="status-text">正在连接 EMQX Cloud...</span>
+                </div>
+
+                <!-- 日夜模式切换按钮 -->
+                <button onclick="toggleTheme()" class="p-2 rounded-xl theme-card hover:opacity-80 transition cursor-pointer" title="切换日夜模式">
+                    <i data-lucide="moon" id="theme-icon" class="w-5 h-5"></i>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- 主体内容区域 -->
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
+
+        <!-- 配置面板折叠卡片（方便用户直接在网页输入 WebSocket 参数） -->
+        <div class="theme-card rounded-2xl p-6">
+            <div class="flex justify-between items-center cursor-pointer" onclick="toggleConfig()">
+                <div class="flex items-center space-x-2">
+                    <i data-lucide="settings" class="w-5 h-5 text-amber-500"></i>
+                    <h2 class="font-semibold text-base">EMQX Cloud WebSocket 连接配置</h2>
+                </div>
+                <span class="text-xs opacity-60" id="config-toggle-text">点击展开/收起 ▾</span>
+            </div>
+            
+            <div id="config-panel" class="mt-4 grid grid-cols-1 md:grid-cols-3 gap-4 pt-4 border-t border-gray-200 dark:border-gray-700 hidden">
+                <div>
+                    <label class="block text-xs font-medium opacity-80 mb-1">WebSocket 地址 (Host / IP)</label>
+                    <input type="text" id="ws-host" value="ffe8f10b.ala.asia-southeast1.emqxsl.com" class="w-full px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-transparent focus:outline-none focus:ring-2 focus:ring-amber-500">
+                </div>
+                <div>
+                    <label class="block text-xs font-medium opacity-80 mb-1">WS 端口 (通常 8083 / 8084)</label>
+                    <input type="number" id="ws-port" value="8084" class="w-full px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-transparent focus:outline-none focus:ring-2 focus:ring-amber-500">
+                </div>
+                <div>
+                    <label class="block text-xs font-medium opacity-80 mb-1">订阅主题 (Topic)</label>
+                    <input type="text" id="ws-topic" value="pet/feeder/telemetry" class="w-full px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-transparent focus:outline-none focus:ring-2 focus:ring-amber-500">
+                </div>
+                <div>
+                    <label class="block text-xs font-medium opacity-80 mb-1">认证用户名 (Username)</label>
+                    <input type="text" id="ws-username" value="admin" class="w-full px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-transparent focus:outline-none focus:ring-2 focus:ring-amber-500">
+                </div>
+                <div>
+                    <label class="block text-xs font-medium opacity-80 mb-1">认证密码 (Password)</label>
+                    <input type="password" id="ws-password" value="public" class="w-full px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-transparent focus:outline-none focus:ring-2 focus:ring-amber-500">
+                </div>
+                <div class="flex items-end md:col-span-4">
+                    <button onclick="reconnectMQTT()" class="w-full bg-amber-500 hover:bg-amber-600 text-white font-medium py-2 px-4 rounded-lg text-sm transition shadow-sm cursor-pointer">
+                        重新连接 MQTT Cloud
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 顶部核心数据卡片网格 -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+            
+            <!-- 环境温度卡片 -->
+            <div class="theme-card rounded-2xl p-6 relative overflow-hidden">
+                <div class="flex items-center justify-between">
+                    <p class="text-sm font-medium opacity-70">环境温度 (Temperature)</p>
+                    <div class="p-3 bg-red-500/10 text-red-500 rounded-xl">
+                        <i data-lucide="thermometer" class="w-6 h-6"></i>
+                    </div>
+                </div>
+                <div class="mt-4 flex items-baseline space-x-2">
+                    <span class="text-4xl font-extrabold tracking-tight" id="val-temp">--</span>
+                    <span class="text-xl font-semibold opacity-60">°C</span>
+                </div>
+                <div class="mt-3 flex items-center text-xs opacity-65">
+                    <i data-lucide="activity" class="w-3.5 h-3.5 mr-1 text-red-500"></i>
+                    <span>实时监测喂食器周边环境</span>
+                </div>
+            </div>
+
+            <!-- 剩余粮量卡片 -->
+            <div class="theme-card rounded-2xl p-6 relative overflow-hidden">
+                <div class="flex items-center justify-between">
+                    <p class="text-sm font-medium opacity-70">剩余粮量 (Food Percentage)</p>
+                    <div class="p-3 bg-amber-500/10 text-amber-500 rounded-xl">
+                        <i data-lucide="package" class="w-6 h-6"></i>
+                    </div>
+                </div>
+                <div class="mt-4 flex items-baseline space-x-2">
+                    <span class="text-4xl font-extrabold tracking-tight" id="val-food">--</span>
+                    <span class="text-xl font-semibold opacity-60">%</span>
+                </div>
+                <!-- 粮量动态进度条 -->
+                <div class="mt-3 w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2 overflow-hidden">
+                    <div id="food-progress-bar" class="bg-amber-500 h-2 rounded-full transition-all duration-500" style="width: 0%"></div>
+                </div>
+            </div>
+
+            <!-- 设备状态卡片 -->
+            <div class="theme-card rounded-2xl p-6 relative overflow-hidden">
+                <div class="flex items-center justify-between">
+                    <p class="text-sm font-medium opacity-70">设备运行状态 (Status)</p>
+                    <div class="p-3 bg-emerald-500/10 text-emerald-500 rounded-xl" id="status-icon-wrapper">
+                        <i data-lucide="check-circle" class="w-6 h-6" id="status-lucide-icon"></i>
+                    </div>
+                </div>
+                <div class="mt-4">
+                    <span id="val-status" class="inline-flex items-center px-3 py-1 rounded-full text-base font-semibold bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200">
+                        Waiting for data...
+                    </span>
+                </div>
+                <div class="mt-3 flex items-center text-xs opacity-65">
+                    <i data-lucide="shield-check" class="w-3.5 h-3.5 mr-1 text-emerald-500"></i>
+                    <span id="device-id-label">Device ID: --</span>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- 实时数据折线图区 -->
+        <div class="theme-card rounded-2xl p-6">
+            <div class="flex items-center justify-between mb-4">
+                <div class="flex items-center space-x-2">
+                    <i data-lucide="line-chart" class="w-5 h-5 text-amber-500"></i>
+                    <h2 class="font-semibold text-base">环境温度与粮量实时趋势</h2>
+                </div>
+                <span class="text-xs opacity-60" id="last-update-time">最后更新: 从未接收</span>
+            </div>
+            <div class="h-80 relative">
+                <canvas id="realtimeChart"></canvas>
+            </div>
+        </div>
+
+        <!-- MQTT 实时接收日志区 -->
+        <div class="theme-card rounded-2xl p-6 flex flex-col">
+            <div class="flex items-center justify-between mb-3">
+                <div class="flex items-center space-x-2">
+                    <i data-lucide="terminal" class="w-5 h-5 text-amber-500"></i>
+                    <h2 class="font-semibold text-base">MQTT 实时接收日志</h2>
+                </div>
+                <button onclick="clearLogs()" class="text-xs opacity-60 hover:opacity-100 underline cursor-pointer">清空日志</button>
+            </div>
+            <div id="log-container" class="bg-gray-900 text-emerald-400 font-mono text-xs rounded-xl p-4 h-40 overflow-y-auto space-y-1">
+                <div class="opacity-50">[System] 网页可视化大屏已初始化，准备连接 MQTT Broker...</div>
+            </div>
+        </div>
+
+    </main>
+
+    <!-- JavaScript 交互逻辑 -->
+    <script>
+        // 初始化 Lucide 图标
+        lucide.createIcons();
+
+        // 日夜模式切换
+        function toggleTheme() {
+            const body = document.body;
+            const icon = document.getElementById('theme-icon');
+            if (body.classList.contains('light')) {
+                body.classList.replace('light', 'dark');
+                icon.setAttribute('data-lucide', 'sun');
+            } else {
+                body.classList.replace('dark', 'light');
+                icon.setAttribute('data-lucide', 'moon');
+            }
+            lucide.createIcons();
+            updateChartTheme();
+        }
+
+        // 配置面板折叠
+        function toggleConfig() {
+            const panel = document.getElementById('config-panel');
+            panel.classList.toggle('hidden');
+        }
+
+        // 日志打印函数
+        function addLog(message) {
+            const container = document.getElementById('log-container');
+            const timeStr = new Date().toLocaleTimeString();
+            const div = document.createElement('div');
+            div.innerHTML = `<span class="opacity-40">[${timeStr}]</span> ${message}`;
+            container.appendChild(div);
+            container.scrollTop = container.scrollHeight;
+        }
+
+        function clearLogs() {
+            document.getElementById('log-container.innerHTML = ""');
+            document.getElementById('log-container').innerHTML = '<div class="opacity-50">[System] 日志已清空。</div>';
+        }
+
+        // Chart.js 实时折线图初始化
+        const ctx = document.getElementById('realtimeChart').getContext('2d');
+        const maxDataPoints = 20; // 最多保留 20 个历史数据点
+
+        const chartData = {
+            labels: [],
+            datasets: [
+                {
+                    label: '环境温度 (°C)',
+                    data: [],
+                    borderColor: '#ef4444',
+                    backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                    borderWidth: 2,
+                    tension: 0.3,
+                    yAxisID: 'y'
+                },
+                {
+                    label: '剩余粮量 (%)',
+                    data: [],
+                    borderColor: '#f59e0b',
+                    backgroundColor: 'rgba(245, 158, 11, 0.1)',
+                    borderWidth: 2,
+                    tension: 0.3,
+                    yAxisID: 'y1'
+                }
+            ]
+        };
+
+        const realtimeChart = new Chart(ctx, {
+            type: 'line',
+            data: chartData,
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                animation: { duration: 300 },
+                scales: {
+                    x: {
+                        grid: { color: 'rgba(128, 128, 128, 0.1)' },
+                        ticks: { color: 'rgba(128, 128, 128, 0.7)', font: { size: 11 } }
+                    },
+                    y: {
+                        type: 'linear',
+                        display: true,
+                        position: 'left',
+                        title: { display: true, text: '温度 (°C)', color: '#ef4444' },
+                        grid: { color: 'rgba(128, 128, 128, 0.1)' },
+                        ticks: { color: '#ef4444' }
+                    },
+                    y1: {
+                        type: 'linear',
+                        display: true,
+                        position: 'right',
+                        min: 0,
+                        max: 100,
+                        title: { display: true, text: '粮量 (%)', color: '#f59e0b' },
+                        grid: { drawOnChartArea: false },
+                        ticks: { color: '#f59e0b' }
+                    }
+                },
+                plugins: {
+                    legend: { labels: { color: 'inherit', font: { family: 'sans-serif' } } }
+                }
+            }
+        });
+
+        function updateChartTheme() {
+            const isDark = document.body.classList.contains('dark');
+            const textColor = isDark ? '#e1e4e8' : '#2c3e50';
+            realtimeChart.options.plugins.legend.labels.color = textColor;
+            realtimeChart.update();
+        }
+
+        // MQTT.js 客户端连接与订阅逻辑
+        let client = null;
+
+        function connectMQTT() {
+            const host = document.getElementById('ws-host').value.trim();
+            const port = document.getElementById('ws-port').value.trim();
+            const topic = document.getElementById('ws-topic').value.trim();
+            const clientId = 'web_dashboard_' + Math.random().toString(16).substring(2, 8);
+
+            // 拼接 WebSocket URL (wss:// for port 8084)
+            const wsUrl = `wss://${host}:${port}/mqtt`;
+            const username = document.getElementById('ws-username') ? document.getElementById('ws-username').value.trim() : '';
+            const password = document.getElementById('ws-password') ? document.getElementById('ws-password').value.trim() : '';
+            
+            addLog(`正在安全连接 WebSocket: ${wsUrl} (ClientID: ${clientId})`);
+
+            // 更新状态
+            const statusDot = document.getElementById('status-dot');
+            const statusText = document.getElementById('status-text');
+            const statusBadge = document.getElementById('connection-status');
+
+            statusDot.className = "w-2 h-2 rounded-full bg-amber-500 animate-pulse";
+            statusText.innerText = "正在连接...";
+
+            try {
+                const options = {
+                    clientId: clientId,
+                    clean: true,
+                    connectTimeout: 5000,
+                };
+                if (username) options.username = username;
+                if (password) options.password = password;
+
+                client = mqtt.connect(wsUrl, options);
+
+                client.on('connect', () => {
+                    addLog(`WebSocket 连接成功！正在订阅主题: ${topic}`);
+                    statusDot.className = "w-2 h-2 rounded-full bg-emerald-500";
+                    statusText.innerText = "已连接 EMQX Cloud";
+                    statusBadge.className = "flex items-center space-x-2 px-3 py-1.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400";
+                    
+                    client.subscribe(topic, { qos: 1 }, (err) => {
+                        if (!err) {
+                            addLog(`成功订阅主题: ${topic}`);
+                        } else {
+                            addLog(`订阅主题失败: ${err.message}`);
+                        }
+                    });
+                });
+
+                client.on('message', (incomingTopic, payload) => {
+                    try {
+                        const payloadStr = payload.toString();
+                        addLog(`收到消息 [${incomingTopic}]: ${payloadStr}`);
+                        const data = JSON.parse(payloadStr);
+                        
+                        // 更新 UI 数据
+                        updateDashboardUI(data);
+                    } catch (e) {
+                        addLog(`解析消息 JSON 失败: ${e.message}`);
+                    }
+                });
+
+                client.on('error', (err) => {
+                    addLog(`MQTT 连接错误: ${err.message}`);
+                    statusDot.className = "w-2 h-2 rounded-full bg-red-500";
+                    statusText.innerText = "连接异常";
+                });
+
+                client.on('offline', () => {
+                    addLog(`MQTT 客户端离线`);
+                    statusDot.className = "w-2 h-2 rounded-full bg-red-500";
+                    statusText.innerText = "连接断开";
+                });
+
+            } catch (e) {
+                addLog(`初始化 MQTT 失败: ${e.message}`);
+            }
+        }
+
+        function reconnectMQTT() {
+            if (client) {
+                client.end(true, () => {
+                    addLog("已断开旧的 MQTT 连接");
+                    connectMQTT();
+                });
+            } else {
+                connectMQTT();
+            }
+        }
+
+        // 更新仪表盘 UI 的函数
+        function updateDashboardUI(data) {
+            const temp = data.temperature;
+            const food = data.food_percentage;
+            const status = data.status;
+            const deviceId = data.device_id || "smart_pet_feeder_01";
+            const timestamp = data.timestamp ? new Date(data.timestamp * 1000).toLocaleTimeString() : new Date().toLocaleTimeString();
+
+            // 1. 填入数值
+            document.getElementById('val-temp').innerText = temp.toFixed(1);
+            document.getElementById('val-food').innerText = food.toFixed(1);
+            document.getElementById('device-id-label').innerText = `Device ID: ${deviceId}`;
+            document.getElementById('last-update-time').innerText = `最后更新: ${timestamp}`;
+
+            // 2. 更新粮量进度条
+            const progressBar = document.getElementById('food-progress-bar');
+            progressBar.style.width = `${Math.max(0, Math.min(100, food))}%`;
+            if (food < 20) {
+                progressBar.className = "bg-red-500 h-2 rounded-full transition-all duration-500";
+            } else if (food < 50) {
+                progressBar.className = "bg-amber-500 h-2 rounded-full transition-all duration-500";
+            } else {
+                progressBar.className = "bg-emerald-500 h-2 rounded-full transition-all duration-500";
+            }
+
+            // 3. 更新状态标签与图标
+            const statusEl = document.getElementById('val-status');
+            const statusIconWrapper = document.getElementById('status-icon-wrapper');
+            const statusLucideIcon = document.getElementById('status-lucide-icon');
+
+            if (status === 'low_food_warning') {
+                statusEl.innerText = '粮仓告警 (Low Food)';
+                statusEl.className = 'inline-flex items-center px-3 py-1 rounded-full text-base font-semibold bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300';
+                statusIconWrapper.className = 'p-3 bg-red-500/10 text-red-500 rounded-xl';
+                statusLucideIcon.setAttribute('data-lucide', 'alert-triangle');
+            } else {
+                statusEl.innerText = '运行正常 (Normal)';
+                statusEl.className = 'inline-flex items-center px-3 py-1 rounded-full text-base font-semibold bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300';
+                statusIconWrapper.className = 'p-3 bg-emerald-500/10 text-emerald-500 rounded-xl';
+                statusLucideIcon.setAttribute('data-lucide', 'check-circle');
+            }
+            lucide.createIcons();
+
+            // 4. 更新折线图
+            const timeLabel = new Date().toLocaleTimeString();
+            if (chartData.labels.length >= maxDataPoints) {
+                chartData.labels.shift();
+                chartData.datasets[0].data.shift();
+                chartData.datasets[1].data.shift();
+            }
+            chartData.labels.push(timeLabel);
+            chartData.datasets[0].data.push(temp);
+            chartData.datasets[1].data.push(food);
+            realtimeChart.update();
+        }
+
+
+
+        // 页面加载完成后自动连接 MQTT
+        window.addEventListener('load', () => {
+            connectMQTT();
+        });
+    </script>
+</body>
+</html>
