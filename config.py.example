@@ -1,0 +1,11 @@
+# ==================== EMQX Cloud 配置参数示例 ====================
+# 请复制此文件并重命名为 config.py，然后填入你的实际参数
+BROKER_HOST = "your-broker-address.emqxsl.cn"
+BROKER_PORT = 8883
+CLIENT_ID = "smart_pet_feeder_device_01"
+
+USERNAME = "your_username"
+PASSWORD = "your_password"
+
+TOPIC_TELEMETRY = "pet/feeder/telemetry"
+TOPIC_COMMAND = "pet/feeder/command"

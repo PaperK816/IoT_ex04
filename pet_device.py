@@ -3,20 +3,7 @@ import random
 import time
 import ssl
 import paho.mqtt.client as mqtt
-
-# ==================== 配置参数（请根据 EMQX Cloud 实际信息修改） ====================
-BROKER_HOST = "your-broker-address.emqxsl.cn"  # 例如: xxxxx.ala.cn-north-1.emqxsl.cn
-BROKER_PORT = 8883                             # EMQX Cloud TLS/SSL 默认端口
-CLIENT_ID = "smart_pet_feeder_device_01"
-
-# 认证信息（若 EMQX Cloud 启用了客户端认证，请在此填写）
-USERNAME = "your_username"
-PASSWORD = "your_password"
-
-# MQTT 主题
-TOPIC_TELEMETRY = "pet/feeder/telemetry"       # 设备上报数据主题
-TOPIC_COMMAND = "pet/feeder/command"           # 接收云端下发指令主题
-# ==================================================================================
+from config import *
 
 def on_connect(client, userdata, flags, rc, properties=None):
     if rc == 0:
@@ -55,8 +42,6 @@ def main():
             ca_certs="emqxsl-ca.crt",
             tls_version=ssl.PROTOCOL_TLS_CLIENT
         )
-        # 若自签证书需要跳过主机名校验，可取消下面注释：
-        # client.tls_insecure_set(True)
         print("[TLS] CA certificate loaded successfully.")
     except Exception as e:
         print(f"[Warning] Failed to load 'emqxsl-ca.crt': {e}")
